@@ -5,7 +5,7 @@ app.use(express.json());
 
 const agents = [
   {
-    id: "AGT001",
+    id: "AGT002",
     name: "Zach Moreno",
     locationId: "gHhpbYKAxx3zJoYh7aGc",
     apiKey: process.env.AGT001_API_KEY,
@@ -16,7 +16,7 @@ const agents = [
     color: "#e8c547",
   },
   {
-    id: "AGT002",
+    id: "AGT001",
     name: "Logan Obrien",
     locationId: "x0YMXY8w0lNoVMuUgF8K",
     apiKey: process.env.AGT002_API_KEY,
@@ -112,7 +112,10 @@ app.get('/', (req, res) => {
 
 app.post('/webhook/ghl-lead', async (req, res) => {
   try {
-    const { firstName, lastName, email, phone } = req.body;
+    const firstName = req.body.firstName || req.body.first_name || req.body.contact?.firstName || '';
+    const lastName = req.body.lastName || req.body.last_name || req.body.contact?.lastName || '';
+    const email = req.body.email || req.body.contact?.email || '';
+    const phone = req.body.phone || req.body.phoneNumber || req.body.contact?.phone || '';
     const state = (req.body.State || req.body.state || '').toUpperCase().trim();
 
     console.log('Incoming lead:', { firstName, lastName, state });
