@@ -11,11 +11,3 @@
   }
 }
 ```
-
----
-
-### File 2 — `Procfile` (no extension, just that name)
-
-Create a new file called exactly `Procfile` (capital P, no `.txt` or anything after it) and paste this:
-```
-web: node server.js
