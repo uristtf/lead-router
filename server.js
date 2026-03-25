@@ -8,6 +8,7 @@ const agents = [
     id: "AGT001",
     name: "Zach Moreno",
     ghlSubAccount: "gHhpbYKAxx3zJoYh7aGc",
+    apiKey: process.env.AGT001_API_KEY,
     states: ["AZ", "UT", "NV", "CA", "AK", "CO", "CT", "DC", "FL", "HI", "IA", "ID", "IL", "KY", "MD", "ME", "MI", "MO", "MT", "NC", "NE", "NM", "NV", "OH", "PA", "SC", "TN", "TX", "VA", "WI", "WV"],
     priority: 2,
     active: true,
@@ -18,6 +19,7 @@ const agents = [
     id: "AGT002",
     name: "Logan Obrien",
     ghlSubAccount: "x0YMXY8w0lNoVMuUgF8K",
+    apiKey: process.env.AGT002_API_KEY,
     states: ["CA", "NV", "AZ", "UT"],
     priority: 1,
     active: true,
@@ -28,6 +30,7 @@ const agents = [
     id: "AGT003",
     name: "Payson Reed",
     ghlSubAccount: "UcIWFPa7iW18LuWlWRpE",
+    apiKey: process.env.AGT003_API_KEY,
     states: ["FL", "CT", "SC", "NC", "AL", "AZ", "CA", "GA", "IL", "IN", "MI", "NM", "OH", "NC", "TX", "WA", "VI", "PA", "OR"],
     priority: 3,
     active: true,
@@ -38,6 +41,7 @@ const agents = [
      id: "AGT004",
     name: "Joseph Hawatmeh",
     ghlSubAccount: "gRF4ZSW0aEghzC2n6d1K",
+    apiKey: process.env.AGT004_API_KEY,
     states: ["FL", "AL", "SC", "NC", "AR", "AZ", "CA", "HI", "IL", "IN", "MI", "MO", "NM", "OH", "OR", "PA", "TN", "TX", "VA", "WA"],
     priority: 4,
     active: true,
@@ -48,6 +52,7 @@ const agents = [
      id: "AGT005",
     name: "Payton Phillips",
     ghlSubAccount: "kFPKCnye3Y5T9c6Cbdl8",
+    apiKey: process.env.AGT005_API_KEY,
     states: ["FL", "wv", "SC", "NC", "VA"],
     priority: 5,
     active: true,
@@ -106,16 +111,10 @@ app.post('/webhook/ghl-lead', async (req, res) => {
 
     await axios.post(
   'https://services.leadconnectorhq.com/contacts/',
-  { 
-    firstName, 
-    lastName, 
-    email, 
-    phone,
-    locationId: agent.ghlSubAccountId
-  },
+  { firstName, lastName, email, phone, locationId: agent.ghlSubAccountId },
   {
     headers: {
-      'Authorization': 'Bearer ' + process.env.GHL_API_KEY,
+      'Authorization': 'Bearer ' + agent.apiKey,
       'Content-Type': 'application/json',
       'Version': '2021-07-28'
     }
