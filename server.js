@@ -156,7 +156,7 @@ app.post('/webhook/ghl-lead', async (req, res) => {
     await axios.post(
       'https://services.leadconnectorhq.com/opportunities/',
       {
-        title: (firstName + ' ' + lastName).trim(),
+        name: (firstName + ' ' + lastName).trim(),
         contactId: contactId,
         locationId: agent.locationId,
         pipelineId: pipelineInfo.pipelineId,
