@@ -105,17 +105,23 @@ app.post('/webhook/ghl-lead', async (req, res) => {
     }
 
     await axios.post(
-      'https://rest.gohighlevel.com/v1/contacts/',
-      { firstName, lastName, email, phone },
-      {
-        headers: {
-          'Authorization': 'Bearer ' + process.env.GHL_API_KEY,
-          'Content-Type': 'application/json',
-          'GHL-Location-ID': agent.ghlSubAccountId,
-        }
-      }
-    );
-
+  'https://services.leadconnectorhq.com/contacts/',
+  { 
+    firstName, 
+    lastName, 
+    email, 
+    phone,
+    locationId: agent.ghlSubAccountId
+  },
+  {
+    headers: {
+      'Authorization': 'Bearer ' + process.env.GHL_API_KEY,
+      'Content-Type': 'application/json',
+      'Version': '2021-07-28'
+    }
+  }
+);
+    
     console.log('Routed: ' + firstName + ' (' + state + ') to ' + agent.name);
     res.json({ status: 'routed', agent: agent.name });
 
