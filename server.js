@@ -131,6 +131,7 @@ app.post('/webhook/ghl-lead', async (req, res) => {
     }
 
     console.log('Routing to: ' + agent.name);
+    console.log('Using locationId: ' + agent.locationId + ' with key ending: ' + agent.apiKey?.slice(-6));
 
     // Step 1: Create contact
     const contactResponse = await axios.post(
