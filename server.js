@@ -12,7 +12,7 @@ let agents = [
     name: "Logan Obrien",
     locationId: "x0YMXY8w0lNoVMuUgF8K",
     apiKey: process.env.AGT001_API_KEY,
-    states: ["CA", "NV", "AZ", "UT"],
+    states: ["AZ", "UT", "NV", "CA", "AK", "CO", "CT", "DC", "FL", "HI", "IA", "ID", "IL", "KY", "MD", "ME", "MI", "MO", "MT", "NC", "NE", "NM", "NV", "OH", "PA", "SC", "TN", "TX", "VA", "WI", "WV"],
     priority: 1,
     active: true,
     leadsReceived: 0,
