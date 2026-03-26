@@ -449,4 +449,3 @@ app.post('/webhook/ghl-lead', async (req, res) => {
 
 recalculatePriorities();
 app.listen(3000, () => console.log('LeadRouter running on port 3000'));
-```
