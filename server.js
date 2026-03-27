@@ -1,12 +1,16 @@
 const express = require('express');
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'systems!';
+const DATA_FILE = path.join('/tmp', 'leadrouter-data.json');
 
-let agents = [
+// ── DEFAULT STATE ─────────────────────────────────────────
+const DEFAULT_AGENTS = [
   {
     id: "AGT001",
     name: "Logan Obrien",
@@ -64,10 +68,85 @@ let agents = [
   },
   ];
 
-let metaPointer = 0;
-let googlePointer = 0;
+// ── PERSISTENT STORAGE ────────────────────────────────────
+function loadData() {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const saved = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+      // Merge saved data with defaults (handles new agents added to code)
+      const merged = DEFAULT_AGENTS.map(defaultAgent => {
+        const savedAgent = saved.agents?.find(a => a.id === defaultAgent.id);
+        if (savedAgent) {
+          return {
+            ...defaultAgent,
+            // Keep config from code but restore counts and settings
+            states: savedAgent.states || defaultAgent.states,
+            metaLeads: savedAgent.metaLeads ?? defaultAgent.metaLeads,
+            googleLeads: savedAgent.googleLeads ?? defaultAgent.googleLeads,
+            leadsReceived: savedAgent.leadsReceived || 0,
+            metaReceived: savedAgent.metaReceived || 0,
+            googleReceived: savedAgent.googleReceived || 0,
+            active: savedAgent.active ?? defaultAgent.active,
+          };
+        }
+        return defaultAgent;
+      });
+      // Add any agents saved that aren't in defaults (added via admin panel)
+      saved.agents?.forEach(savedAgent => {
+        if (!merged.find(a => a.id === savedAgent.id)) {
+          merged.push({
+            ...savedAgent,
+            apiKey: process.env[savedAgent.apiKeyVar] || savedAgent.apiKey,
+          });
+        }
+      });
+      return {
+        agents: merged,
+        metaPointer: saved.metaPointer || 0,
+        googlePointer: saved.googlePointer || 0,
+        unknownPointer: saved.unknownPointer || 0,
+      };
+    }
+  } catch (err) {
+    console.log('Could not load saved data, using defaults:', err.message);
+  }
+  return {
+    agents: DEFAULT_AGENTS,
+    metaPointer: 0,
+    googlePointer: 0,
+    unknownPointer: 0,
+  };
+}
+
+function saveData() {
+  try {
+    const toSave = {
+      agents: agents.map(a => ({
+        ...a,
+        apiKey: undefined, // never save API keys to disk
+      })),
+      metaPointer,
+      googlePointer,
+      unknownPointer,
+      savedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(DATA_FILE, JSON.stringify(toSave, null, 2));
+  } catch (err) {
+    console.log('Could not save data:', err.message);
+  }
+}
+
+// ── LOAD INITIAL STATE ────────────────────────────────────
+const loaded = loadData();
+let agents = loaded.agents;
+let metaPointer = loaded.metaPointer;
+let googlePointer = loaded.googlePointer;
+let unknownPointer = loaded.unknownPointer;
 let activityLog = [];
 
+console.log('Loaded state — Meta pointer:', metaPointer, 'Google pointer:', googlePointer);
+
+// ── LOGGING ───────────────────────────────────────────────
 function addLog(status, message, source) {
   activityLog.unshift({
     id: Math.random().toString(36).substr(2, 9),
@@ -79,13 +158,14 @@ function addLog(status, message, source) {
   if (activityLog.length > 200) activityLog = activityLog.slice(0, 200);
 }
 
+// ── QUEUE LOGIC ───────────────────────────────────────────
 function buildQueueForSource(source) {
+  const leadsKey = source === 'meta-ads' ? 'metaLeads' : source === 'google-ads' ? 'googleLeads' : 'metaLeads';
+  const eligible = agents.filter(a => a.active && a[leadsKey] > 0);
+  if (!eligible.length) return [];
+  const min = Math.min(...eligible.map(a => a[leadsKey]));
   const q = [];
-  const leadsKey = source === 'meta-ads' ? 'metaLeads' : 'googleLeads';
-  agents.filter(a => a.active && a[leadsKey] > 0).forEach(a => {
-    const min = Math.min(...agents
-      .filter(x => x.active && x[leadsKey] > 0)
-      .map(x => x[leadsKey]));
+  eligible.forEach(a => {
     const slots = Math.max(1, Math.round(a[leadsKey] / min));
     for (let i = 0; i < slots; i++) q.push(a.id);
   });
@@ -95,26 +175,29 @@ function buildQueueForSource(source) {
 function getNextAgent(state, source) {
   const queue = buildQueueForSource(source);
   if (!queue.length) return null;
+  const leadsKey = source === 'meta-ads' ? 'metaLeads' : source === 'google-ads' ? 'googleLeads' : 'metaLeads';
   const eligible = new Set(
-    agents.filter(a => {
-      const leadsKey = source === 'meta-ads' ? 'metaLeads' : 'googleLeads';
-      return a.active && a[leadsKey] > 0 && a.states.includes(state);
-    }).map(a => a.id)
+    agents.filter(a => a.active && a[leadsKey] > 0 && a.states.includes(state)).map(a => a.id)
   );
-  if (eligible.size === 0) return null;
-  let pointer = source === 'meta-ads' ? metaPointer : googlePointer;
+  if (!eligible.size) return null;
+
+  let pointer = source === 'meta-ads' ? metaPointer : source === 'google-ads' ? googlePointer : unknownPointer;
+
   for (let i = 0; i < queue.length * 2; i++) {
     const id = queue[pointer % queue.length];
     pointer = (pointer + 1) % queue.length;
     if (eligible.has(id)) {
       if (source === 'meta-ads') metaPointer = pointer;
-      else googlePointer = pointer;
+      else if (source === 'google-ads') googlePointer = pointer;
+      else unknownPointer = pointer;
+      saveData();
       return agents.find(a => a.id === id);
     }
   }
   return null;
 }
 
+// ── GHL HELPERS ───────────────────────────────────────────
 async function getPipelineAndStage(agent) {
   const response = await axios.get(
     'https://services.leadconnectorhq.com/opportunities/pipelines?locationId=' + agent.locationId,
@@ -144,8 +227,19 @@ async function applyTagToContact(agent, contactId, tag) {
 
 function detectLeadSource(body) {
   const src = (body.lead_source || body.leadSource || body.source || '').toLowerCase();
+  // Check for tags passed from GHL
+  const tags = body.tags || body.contact_tags || '';
+  if (typeof tags === 'string') {
+    if (tags.includes('meta-ads')) return 'meta-ads';
+    if (tags.includes('google-ads')) return 'google-ads';
+  }
+  if (Array.isArray(tags)) {
+    if (tags.some(t => t.includes('meta'))) return 'meta-ads';
+    if (tags.some(t => t.includes('google'))) return 'google-ads';
+  }
   if (src === 'campaign' || body.facebook_leadgen_id) return 'meta-ads';
   if (src === 'marketplace') return 'google-ads';
+  if (src) return src;
   return 'unknown';
 }
 
@@ -160,6 +254,7 @@ function parseLeadFields(body) {
   };
 }
 
+// ── AUTH ──────────────────────────────────────────────────
 function checkAuth(req, res, next) {
   const auth = req.headers['authorization'];
   if (auth === 'Bearer ' + ADMIN_PASSWORD) return next();
@@ -168,6 +263,7 @@ function checkAuth(req, res, next) {
   res.redirect('/admin/login');
 }
 
+// ── STYLES ────────────────────────────────────────────────
 const sourceColors = {
   'meta-ads': { bg: '#1877f222', color: '#1877f2', border: '#1877f244', label: 'Meta Ads' },
   'google-ads': { bg: '#34a85322', color: '#34a853', border: '#34a85344', label: 'Google Ads' },
@@ -239,6 +335,10 @@ const styles = `
   .source-split > div { flex: 1; background: #0d0d1f; border-radius: 6px; padding: 8px 10px; }
   .source-label { font-size: 9px; letter-spacing: 1px; font-weight: 700; margin-bottom: 4px; }
   .source-value { font-size: 16px; font-weight: 900; }
+  .count-split { display: flex; gap: 8px; }
+  .count-split > div { flex: 1; background: #0d0d1f; border-radius: 6px; padding: 6px 8px; text-align: center; }
+  .count-label { font-size: 9px; letter-spacing: 1px; font-weight: 700; margin-bottom: 2px; }
+  .count-value { font-size: 14px; font-weight: 900; }
 `;
 
 function adminPage(activeTab, content) {
@@ -301,6 +401,9 @@ app.post('/admin/login', (req, res) => {
 app.get('/admin', checkAuth, (req, res) => {
   const metaQueue = buildQueueForSource('meta-ads');
   const googleQueue = buildQueueForSource('google-ads');
+  const totalLeads = agents.reduce((s, a) => s + (a.leadsReceived || 0), 0);
+  const totalMeta = agents.reduce((s, a) => s + (a.metaReceived || 0), 0);
+  const totalGoogle = agents.reduce((s, a) => s + (a.googleReceived || 0), 0);
 
   const agentRows = agents.map(a => `
     <tr>
@@ -319,9 +422,25 @@ app.get('/admin', checkAuth, (req, res) => {
         </div>
       </td>
       <td>
+        <div class="count-split">
+          <div>
+            <div class="count-label" style="color:#1877f2">META</div>
+            <div class="count-value" style="color:#1877f2">${a.metaReceived || 0}</div>
+          </div>
+          <div>
+            <div class="count-label" style="color:#34a853">GOOGLE</div>
+            <div class="count-value" style="color:#34a853">${a.googleReceived || 0}</div>
+          </div>
+          <div>
+            <div class="count-label" style="color:#e8c547">TOTAL</div>
+            <div class="count-value" style="color:#e8c547">${a.leadsReceived || 0}</div>
+          </div>
+        </div>
+      </td>
+      <td>
         <div style="font-size:11px;color:#555">
-          Meta: ${metaQueue.filter(id => id === a.id).length}/${metaQueue.length}<br/>
-          Google: ${googleQueue.filter(id => id === a.id).length}/${googleQueue.length}
+          Meta: ${metaQueue.filter(id => id === a.id).length}/${metaQueue.length || 1}<br/>
+          Google: ${googleQueue.filter(id => id === a.id).length}/${googleQueue.length || 1}
         </div>
       </td>
       <td><span class="badge ${a.active ? 'active' : 'paused'}">${a.active ? 'Active' : 'Paused'}</span></td>
@@ -333,16 +452,13 @@ app.get('/admin', checkAuth, (req, res) => {
     </tr>
   `).join('');
 
-  const totalMeta = agents.filter(a => a.active).reduce((s, a) => s + a.metaLeads, 0);
-  const totalGoogle = agents.filter(a => a.active).reduce((s, a) => s + a.googleLeads, 0);
-
   const content = `
     <div class="stats">
       <div class="stat"><div class="stat-label">TOTAL AGENTS</div><div class="stat-value">${agents.length}</div></div>
       <div class="stat"><div class="stat-label">ACTIVE</div><div class="stat-value">${agents.filter(a => a.active).length}</div></div>
-      <div class="stat"><div class="stat-label">WEEKLY META LEADS</div><div class="stat-value" style="color:#1877f2">${totalMeta}</div></div>
-      <div class="stat"><div class="stat-label">WEEKLY GOOGLE LEADS</div><div class="stat-value" style="color:#34a853">${totalGoogle}</div></div>
-      <div class="stat"><div class="stat-label">LEADS ROUTED TODAY</div><div class="stat-value">${activityLog.filter(e => e.status === 'routed').length}</div></div>
+      <div class="stat"><div class="stat-label">TOTAL ROUTED</div><div class="stat-value">${totalLeads}</div></div>
+      <div class="stat"><div class="stat-label">META ROUTED</div><div class="stat-value" style="color:#1877f2">${totalMeta}</div></div>
+      <div class="stat"><div class="stat-label">GOOGLE ROUTED</div><div class="stat-value" style="color:#34a853">${totalGoogle}</div></div>
     </div>
 
     <div class="section-title">Agent Roster</div>
@@ -350,11 +466,16 @@ app.get('/admin', checkAuth, (req, res) => {
 
     <table>
       <thead><tr>
-        <th>AGENT</th><th>LICENSED STATES</th><th>WEEKLY LEADS</th>
-        <th>QUEUE SLOTS</th><th>STATUS</th><th>ACTIONS</th>
+        <th>AGENT</th><th>LICENSED STATES</th><th>WEEKLY ALLOCATION</th>
+        <th>LEADS RECEIVED</th><th>QUEUE SLOTS</th><th>STATUS</th><th>ACTIONS</th>
       </tr></thead>
       <tbody>${agentRows}</tbody>
     </table>
+
+    <div style="display:flex;gap:10px;margin-bottom:20px;">
+      <button onclick="resetCounts()" class="btn btn-toggle" style="padding:8px 16px;font-size:12px;">Reset Lead Counts</button>
+      <button onclick="resetPointers()" class="btn btn-toggle" style="padding:8px 16px;font-size:12px;">Reset Queue Position</button>
+    </div>
 
     <div class="modal" id="editModal">
       <div class="modal-box">
@@ -374,7 +495,7 @@ app.get('/admin', checkAuth, (req, res) => {
             <input type="number" id="editGoogleLeads" min="0" />
           </div>
         </div>
-        <div style="color:#555;font-size:11px;margin-top:-8px;margin-bottom:14px">Set to 0 to exclude agent from that source queue</div>
+        <div style="color:#555;font-size:11px;margin-top:-8px;margin-bottom:14px">Set to 0 to exclude from that source queue</div>
         <div style="display:flex;gap:8px">
           <button class="btn-primary" onclick="saveAgent()">Save Changes</button>
           <button class="btn-cancel" onclick="closeModal('editModal')">Cancel</button>
@@ -385,7 +506,7 @@ app.get('/admin', checkAuth, (req, res) => {
     <div class="modal" id="addModal">
       <div class="modal-box">
         <h2>Add New Agent</h2>
-        <div class="note"><span>Important:</span> First go to Railway → Variables and add their API key as the next number e.g. <span>AGT006_API_KEY</span>. Then enter that variable name below.</div>
+        <div class="note"><span>Important:</span> First go to Railway → Variables and add their API key e.g. <span>AGT006_API_KEY</span>. Then enter that variable name below.</div>
         <label>AGENT NAME</label><input type="text" id="addName" placeholder="John Smith" />
         <label>GHL LOCATION ID</label><input type="text" id="addLocationId" placeholder="Found in GHL sub-account URL" style="font-family:monospace" />
         <label>API KEY VARIABLE NAME</label><input type="text" id="addApiKeyVar" placeholder="AGT006_API_KEY" style="font-family:monospace" />
@@ -449,6 +570,16 @@ app.get('/admin', checkAuth, (req, res) => {
         const res=await fetch('/admin/delete-agent',{method:'POST',headers,body:JSON.stringify({id})});
         if(res.ok)location.reload();else alert('Error removing agent');
       }
+      async function resetCounts(){
+        if(!confirm('Reset all lead counts to zero?'))return;
+        const res=await fetch('/admin/reset-counts',{method:'POST',headers});
+        if(res.ok)location.reload();
+      }
+      async function resetPointers(){
+        if(!confirm('Reset queue position back to agent 1?'))return;
+        const res=await fetch('/admin/reset-pointers',{method:'POST',headers});
+        if(res.ok)location.reload();
+      }
     </script>
   `;
   res.send(adminPage('agents', content));
@@ -504,43 +635,39 @@ app.get('/admin/webhook', checkAuth, (req, res) => {
       <div class="note">Paste this URL into your WestMark Financial lead-router workflow webhook action.</div>
       <div class="code-block">https://lead-router-production.up.railway.app/webhook/ghl-lead</div>
     </div>
-
     <div class="webhook-box">
       <h3>LEAD SOURCE DETECTION</h3>
-      <div class="note">Your router automatically detects and routes to the correct queue:</div>
       <table>
         <thead><tr><th>SOURCE</th><th>HOW DETECTED</th><th>QUEUE</th><th>TAG APPLIED</th></tr></thead>
         <tbody>
           <tr>
             <td>${sourceTag('meta-ads')}</td>
-            <td style="color:#888;font-size:12px">lead_source = "campaign" OR facebook_leadgen_id present</td>
+            <td style="color:#888;font-size:12px">Contact has meta-ads tag OR lead_source = "campaign"</td>
             <td style="color:#1877f2;font-size:12px;font-weight:700">Meta Queue</td>
             <td><span style="font-family:monospace;color:#888;font-size:11px">meta-ads</span></td>
           </tr>
           <tr>
             <td>${sourceTag('google-ads')}</td>
-            <td style="color:#888;font-size:12px">lead_source = "marketplace"</td>
+            <td style="color:#888;font-size:12px">Contact has google-ads tag OR lead_source = "marketplace"</td>
             <td style="color:#34a853;font-size:12px;font-weight:700">Google Queue</td>
             <td><span style="font-family:monospace;color:#888;font-size:11px">google-ads</span></td>
           </tr>
         </tbody>
       </table>
     </div>
-
     <div class="webhook-box">
-      <h3>WESTMARK FINANCIAL — LEAD ROUTER WORKFLOW</h3>
-      <div class="step"><div class="step-num">1</div><div class="step-content">Trigger: <strong>Contact Created</strong> — no filters</div></div>
+      <h3>WESTMARK — LEAD ROUTER WORKFLOW</h3>
+      <div class="step"><div class="step-num">1</div><div class="step-content">Triggers: <strong>Contact Tag Added → meta-ads</strong> AND <strong>Contact Tag Added → google-ads</strong></div></div>
       <div class="step"><div class="step-num">2</div><div class="step-content">Action: <strong>Webhook → POST</strong> to the URL above</div></div>
-      <div class="step"><div class="step-num">3</div><div class="step-content">Custom Data: <strong>State → {{contact.state}}</strong> and <strong>leadSource → {{contact.lead_source}}</strong></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-content">Custom Data: <strong>State → {{contact.state}}</strong></div></div>
       <div class="step"><div class="step-num">4</div><div class="step-content">Make sure workflow is <strong>Published</strong></div></div>
     </div>
-
     <div class="webhook-box">
       <h3>OTHER GHL — ACL LEAD INPUT WORKFLOW</h3>
-      <div class="step"><div class="step-num">1</div><div class="step-content">After Create Contact, add <strong>If/Else condition</strong>: Lead Source contains "campaign"</div></div>
-      <div class="step"><div class="step-num">2</div><div class="step-content">YES branch → <strong>Add Tag: meta-ads</strong> → Copy Contact to WestMark → Update Opportunity</div></div>
-      <div class="step"><div class="step-num">3</div><div class="step-content">NO branch → <strong>Add Tag: google-ads</strong> → Copy Contact to WestMark → Update Opportunity</div></div>
-      <div class="step"><div class="step-num">4</div><div class="step-content">In Copy Contact: <strong>Copy Tags ON</strong>, Copy Custom Fields ON, no tags hardcoded</div></div>
+      <div class="step"><div class="step-num">1</div><div class="step-content">Trigger: <strong>Inbound Webhook</strong></div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-content">Create Contact with State = <strong>{{inboundWebhookRequest.region}}</strong></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-content">If/Else: Lead Source contains "campaign" → <strong>Add Tag: meta-ads</strong> / else → <strong>Add Tag: google-ads</strong></div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-content">Copy Contact to WestMark with <strong>Copy Tags ON</strong></div></div>
     </div>
   `;
   res.send(adminPage('webhook', content));
@@ -554,6 +681,7 @@ app.post('/admin/update-agent', checkAuth, (req, res) => {
   agent.states = states;
   agent.metaLeads = metaLeads;
   agent.googleLeads = googleLeads;
+  saveData();
   res.json({ success: true });
 });
 
@@ -561,8 +689,14 @@ app.post('/admin/add-agent', checkAuth, (req, res) => {
   const { name, locationId, apiKeyVar, states, metaLeads, googleLeads } = req.body;
   const id = 'AGT' + String(agents.length + 1).padStart(3, '0');
   const apiKey = process.env[apiKeyVar];
-  agents.push({ id, name, locationId, apiKey, states, metaLeads, googleLeads, active: true });
-  addLog('routed', `Agent added: ${name} (${states.join(', ')}) — Meta: ${metaLeads}, Google: ${googleLeads}`);
+  agents.push({
+    id, name, locationId, apiKey, apiKeyVar,
+    states, metaLeads, googleLeads,
+    leadsReceived: 0, metaReceived: 0, googleReceived: 0,
+    active: true,
+  });
+  saveData();
+  addLog('routed', `Agent added: ${name} — Meta: ${metaLeads}, Google: ${googleLeads}`);
   res.json({ success: true });
 });
 
@@ -571,6 +705,7 @@ app.post('/admin/toggle-agent', checkAuth, (req, res) => {
   const agent = agents.find(a => a.id === id);
   if (!agent) return res.status(404).json({ error: 'Not found' });
   agent.active = !agent.active;
+  saveData();
   addLog(agent.active ? 'routed' : 'unrouted', `Agent ${agent.active ? 'resumed' : 'paused'}: ${agent.name}`);
   res.json({ success: true });
 });
@@ -581,6 +716,21 @@ app.post('/admin/delete-agent', checkAuth, (req, res) => {
   if (!agent) return res.status(404).json({ error: 'Not found' });
   addLog('unrouted', `Agent removed: ${agent.name}`);
   agents = agents.filter(a => a.id !== id);
+  saveData();
+  res.json({ success: true });
+});
+
+app.post('/admin/reset-counts', checkAuth, (req, res) => {
+  agents = agents.map(a => ({ ...a, leadsReceived: 0, metaReceived: 0, googleReceived: 0 }));
+  saveData();
+  res.json({ success: true });
+});
+
+app.post('/admin/reset-pointers', checkAuth, (req, res) => {
+  metaPointer = 0;
+  googlePointer = 0;
+  unknownPointer = 0;
+  saveData();
   res.json({ success: true });
 });
 
@@ -609,7 +759,7 @@ app.post('/webhook/ghl-lead', async (req, res) => {
     const agent = getNextAgent(state, leadSource);
     if (!agent) {
       addLog('unrouted', `No licensed agent for ${state} [${leadSource}] — ${firstName} ${lastName}`, leadSource);
-      return res.json({ status: 'unrouted', reason: `No licensed agent for ${state} in ${leadSource} queue` });
+      return res.json({ status: 'unrouted', reason: `No licensed agent for ${state}` });
     }
 
     console.log(`Routing to: ${agent.name} via ${leadSource} queue`);
@@ -653,7 +803,14 @@ app.post('/webhook/ghl-lead', async (req, res) => {
       { headers: { 'Authorization': 'Bearer ' + agent.apiKey, 'Content-Type': 'application/json', 'Version': '2021-07-28' } }
     );
 
+    // Update counts
+    agent.leadsReceived = (agent.leadsReceived || 0) + 1;
+    if (leadSource === 'meta-ads') agent.metaReceived = (agent.metaReceived || 0) + 1;
+    else if (leadSource === 'google-ads') agent.googleReceived = (agent.googleReceived || 0) + 1;
+    saveData();
+
     addLog('routed', `${firstName} ${lastName} (${state}) → ${agent.name}`, leadSource);
+    console.log(`Opportunity created -> ${agent.name}`);
     res.json({ status: 'routed', agent: agent.name, source: leadSource });
 
   } catch (err) {
