@@ -259,6 +259,22 @@ function detectLeadSource(body) {
 }
 
 function parseLeadFields(body) {
+  // Extract beneficiary info from At Cost Leads payload
+  const questions = body.facebook_questions_answers || [];
+  const customFields = body.custom_fields || {};
+
+  const beneRelationship = 
+    customFields['Who Is Your Beneficiary?'] ||
+    questions.find(q => q.field_name === 'question_2')?.answer || '';
+
+  const beneName =
+    customFields['Beneficiary name?'] ||
+    questions.find(q => q.field_name === 'question_3')?.answer || '';
+
+  const intent =
+    customFields['How Important Is It To You That Your Family Wouldnt Lose The Home If You Passed Away Unexpectedly?'] ||
+    questions.find(q => q.field_name === 'question_1')?.answer || '';
+
   return {
     firstName: body.first_name || body.firstName || body.contact?.firstName || '',
     lastName: body.last_name || body.lastName || body.contact?.lastName || '',
@@ -266,6 +282,9 @@ function parseLeadFields(body) {
     phone: body.phone || body.textable_phone || body.phoneNumber || body.contact?.phone || '',
     state: (body.region || body.State || body.state || body.contact?.state || '').toUpperCase().trim(),
     leadSource: detectLeadSource(body),
+    beneRelationship,
+    beneName,
+    intent,
   };
 }
 
@@ -763,7 +782,7 @@ app.get('/', (req, res) => res.send('LeadRouter is running!'));
 
 app.post('/webhook/ghl-lead', async (req, res) => {
   try {
-    const { firstName, lastName, email, phone, state, leadSource } = parseLeadFields(req.body);
+    const { firstName, lastName, email, phone, state, leadSource, beneRelationship, beneName, intent } = parseLeadFields(req.body);
     console.log('Incoming lead:', { firstName, lastName, state, leadSource });
 
     if (!state) {
@@ -805,18 +824,28 @@ app.post('/webhook/ghl-lead', async (req, res) => {
     const sourceLabel = leadSource === 'meta-ads' ? 'Meta Ads' : leadSource === 'google-ads' ? 'Google Ads' : 'Lead';
     const oppName = `${firstName} ${lastName} — ${sourceLabel}`.trim() || 'New Lead';
 
-    await axios.post(
-      'https://services.leadconnectorhq.com/opportunities/',
-      {
-        name: oppName,
-        contactId,
-        locationId: agent.locationId,
-        pipelineId: pipelineInfo.pipelineId,
-        pipelineStageId: pipelineInfo.stageId,
-        status: 'open',
-      },
-      { headers: { 'Authorization': 'Bearer ' + agent.apiKey, 'Content-Type': 'application/json', 'Version': '2021-07-28' } }
-    );
+    const contactResponse = await axios.post(
+  'https://services.leadconnectorhq.com/contacts/',
+  {
+    firstName,
+    lastName,
+    email,
+    phone,
+    locationId: agent.locationId,
+    customFields: [
+      ...(beneRelationship ? [{ key: 'benerelationship', field_value: beneRelationship }] : []),
+      ...(beneName ? [{ key: 'benename', field_value: beneName }] : []),
+      ...(intent ? [{ key: 'intent', field_value: intent }] : []),
+    ],
+  },
+  {
+    headers: {
+      'Authorization': 'Bearer ' + agent.apiKey,
+      'Content-Type': 'application/json',
+      'Version': '2021-07-28',
+    }
+  }
+);
 
     // Update counts
     agent.leadsReceived = (agent.leadsReceived || 0) + 1;
