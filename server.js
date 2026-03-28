@@ -388,7 +388,7 @@ const styles = `
 function adminPage(activeTab, content) {
   return `<!DOCTYPE html><html><head><title>LeadRouter Admin</title><style>${styles}</style></head><body>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-      <h1>⟳ LeadRouter Admin</h1>
+      <h1>⟳ True West Systems LeadRouter Admin</h1>
       <a href="/admin/logout" class="logout">Logout</a>
     </div>
     <div class="subtitle">Manage agents, lead allocations, and licensed states</div>
@@ -404,12 +404,12 @@ function adminPage(activeTab, content) {
 
 // ── LOGIN ─────────────────────────────────────────────────
 app.get('/admin/login', (req, res) => {
-  res.send(`<!DOCTYPE html><html><head><title>LeadRouter Admin</title><style>
+  res.send(`<!DOCTYPE html><html><head><title>True West Systems LeadRouter Admin</title><style>
     ${styles} body{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:0;}
     .box{background:#111128;border:1px solid #2a2a3e;border-radius:12px;padding:40px;width:360px;}
   </style></head><body>
     <div class="box">
-      <h1>⟳ LeadRouter</h1>
+      <h1>⟳ True West Systems LeadRouter</h1>
       <p class="subtitle">Admin Dashboard — Enter password to continue</p>
       <form method="POST" action="/admin/login">
         <label>PASSWORD</label>
@@ -425,13 +425,13 @@ app.post('/admin/login', (req, res) => {
     res.setHeader('Set-Cookie', `admin_auth=${ADMIN_PASSWORD}; Path=/; HttpOnly`);
     res.redirect('/admin');
   } else {
-    res.send(`<!DOCTYPE html><html><head><title>LeadRouter Admin</title><style>
+    res.send(`<!DOCTYPE html><html><head><title>True West Systems LeadRouter Admin</title><style>
       ${styles} body{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:0;}
       .box{background:#111128;border:1px solid #2a2a3e;border-radius:12px;padding:40px;width:360px;}
       .error{color:#ff5555;font-size:12px;margin-bottom:12px;}
     </style></head><body>
       <div class="box">
-        <h1>⟳ LeadRouter</h1>
+        <h1>⟳ True West Systems LeadRouter</h1>
         <p class="subtitle">Admin Dashboard</p>
         <p class="error">Wrong password. Try again.</p>
         <form method="POST" action="/admin/login">
