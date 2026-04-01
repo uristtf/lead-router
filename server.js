@@ -54,6 +54,20 @@ const DEFAULT_AGENTS = [
     active: true,
     color: "#a78bfa",
   },
+  {
+    id: "AGT006",
+    name: "Evan Scott",
+    locationId: "eofPDKfOIObsa6qC9Zmu",
+    apiKey: process.env.AGT006_API_KEY,
+    states: ["NC", "SC", "TX", "CA", "FL", "GA", "VA", "NV", "WA", "PA", "MI", "OH", "NJ", "TN", "LA"],
+    metaLeads: 10,
+    googleLeads: 10,
+    leadsReceived: 0,
+    metaReceived: 0,
+    googleReceived: 0,
+    active: true,
+    color: "#a78bfa",
+  },
   ];
 
 // ── PERSISTENT STORAGE ────────────────────────────────────
