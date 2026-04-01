@@ -31,7 +31,7 @@ const DEFAULT_AGENTS = [
     name: "Payton Phillips",
     locationId: "kFPKCnye3Y5T9c6Cbdl8",
     apiKey: process.env.AGT002_API_KEY,
-    states: ["FL", "WV", "SC", "NC", "VA", "AR", "OK", "TX"],
+    states: ["FL", "WV", "SC", "NC", "VA", "AR", "OK", "TX","TN", "OK", "NM", "MI", "KY", "KS"],
     metaLeads: 20,
     googleLeads: 20,
     leadsReceived: 0,
