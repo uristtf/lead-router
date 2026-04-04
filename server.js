@@ -141,8 +141,7 @@ function saveLead(entry) {
   try {
     const leads = loadLeads();
     leads.unshift(entry);
-    const trimmed = leads.slice(0, 1000);
-    fs.writeFileSync(LEADS_FILE, JSON.stringify(trimmed, null, 2));
+    fs.writeFileSync(LEADS_FILE, JSON.stringify(leads.slice(0, 1000), null, 2));
   } catch (err) {
     console.log('Could not save lead:', err.message);
   }
@@ -156,7 +155,7 @@ let googlePointer = loaded.googlePointer;
 let unknownPointer = loaded.unknownPointer;
 let activityLog = [];
 
-console.log('LeadRouter started — Meta pointer:', metaPointer, 'Google pointer:', googlePointer);
+console.log('LeadRouter started — MP pointer:', metaPointer, 'IUL pointer:', googlePointer);
 
 // ── LOGGING ───────────────────────────────────────────────
 function addLog(status, message, source) {
@@ -172,9 +171,9 @@ function addLog(status, message, source) {
 
 // ── QUEUE LOGIC ───────────────────────────────────────────
 function buildQueueForSource(source) {
-  const leadsKey = source === 'meta-ads' ? 'metaLeads' 
-    : source === 'google-ads' ? 'googleLeads' 
-    : 'metaLeads'; // new-lead and unknown use metaLeads queue
+  const leadsKey = source === 'mp-lead' ? 'metaLeads'
+    : source === 'iul-lead' ? 'googleLeads'
+    : 'metaLeads';
   const eligible = agents.filter(a => a.active && a[leadsKey] > 0);
   if (!eligible.length) return [];
   const min = Math.min(...eligible.map(a => a[leadsKey]));
@@ -189,22 +188,22 @@ function buildQueueForSource(source) {
 function getNextAgent(state, source) {
   const queue = buildQueueForSource(source);
   if (!queue.length) return null;
-  const leadsKey = source === 'meta-ads' ? 'metaLeads' 
-    : source === 'google-ads' ? 'googleLeads' 
+  const leadsKey = source === 'mp-lead' ? 'metaLeads'
+    : source === 'iul-lead' ? 'googleLeads'
     : 'metaLeads';
   const eligible = new Set(
     agents.filter(a => a.active && a[leadsKey] > 0 && a.states.includes(state)).map(a => a.id)
   );
   if (!eligible.size) return null;
-  let pointer = source === 'meta-ads' ? metaPointer 
-    : source === 'google-ads' ? googlePointer 
+  let pointer = source === 'mp-lead' ? metaPointer
+    : source === 'iul-lead' ? googlePointer
     : unknownPointer;
   for (let i = 0; i < queue.length * 2; i++) {
     const id = queue[pointer % queue.length];
     pointer = (pointer + 1) % queue.length;
     if (eligible.has(id)) {
-      if (source === 'meta-ads') metaPointer = pointer;
-      else if (source === 'google-ads') googlePointer = pointer;
+      if (source === 'mp-lead') metaPointer = pointer;
+      else if (source === 'iul-lead') googlePointer = pointer;
       else unknownPointer = pointer;
       saveData();
       return agents.find(a => a.id === id);
@@ -243,23 +242,17 @@ async function applyTagToContact(agent, contactId, tag) {
 
 function detectLeadSource(body) {
   const src = (body.lead_source || body.leadSource || body.source || '').toLowerCase();
-  
-  // Check for tags passed from GHL
   const tags = body.tags || body.contact_tags || '';
   if (typeof tags === 'string') {
-    if (tags.includes('new-lead')) return 'new-lead';
-    if (tags.includes('meta-ads')) return 'meta-ads';
-    if (tags.includes('google-ads')) return 'google-ads';
+    if (tags.includes('mp lead') || tags.includes('mp-lead')) return 'mp-lead';
+    if (tags.includes('iul-lead') || tags.includes('iul lead')) return 'iul-lead';
   }
   if (Array.isArray(tags)) {
-    if (tags.some(t => t.includes('new-lead'))) return 'new-lead';
-    if (tags.some(t => t.includes('meta'))) return 'meta-ads';
-    if (tags.some(t => t.includes('google'))) return 'google-ads';
+    if (tags.some(t => t.includes('mp lead') || t.includes('mp-lead'))) return 'mp-lead';
+    if (tags.some(t => t.includes('iul-lead') || t.includes('iul lead'))) return 'iul-lead';
   }
-
-  // Detect from At Cost Leads payload
-  if (src === 'campaign' || body.facebook_leadgen_id) return 'meta-ads';
-  if (src === 'marketplace') return 'google-ads';
+  if (src === 'campaign' || body.facebook_leadgen_id) return 'mp-lead';
+  if (src === 'marketplace') return 'iul-lead';
   if (src) return src;
   return 'unknown';
 }
@@ -268,7 +261,6 @@ function parseLeadFields(body) {
   const questions = body.facebook_questions_answers || [];
   const customFields = body.custom_fields || {};
 
-  // Try facebook questions array first, then custom_fields object
   const intent =
     questions.find(q => q.field_name === 'question_1')?.answer ||
     customFields['How Important Is It To You That Your Family Wouldnt Lose The Home If You Passed Away Unexpectedly?'] ||
@@ -277,12 +269,12 @@ function parseLeadFields(body) {
   const beneRelationship =
     questions.find(q => q.field_name === 'question_2')?.answer ||
     customFields['Who Is Your Beneficiary?'] ||
-    body.contact?.benerelationship || body.benerelationship || '';
+    body.contact?.benerelationship || body.benerelationship || body.Benerelationship || '';
 
   const beneName =
     questions.find(q => q.field_name === 'question_3')?.answer ||
     customFields['Beneficiary name?'] ||
-    body.contact?.benename || body.benename || '';
+    body.contact?.benename || body.benename || body.Benename || '';
 
   return {
     firstName: body.first_name || body.firstName || body.contact?.firstName || '',
@@ -308,8 +300,8 @@ function checkAuth(req, res, next) {
 
 // ── UI HELPERS ────────────────────────────────────────────
 const sourceColors = {
-  'meta-ads': { bg: '#1877f222', color: '#1877f2', border: '#1877f244', label: 'Meta Ads' },
-  'google-ads': { bg: '#34a85322', color: '#34a853', border: '#34a85344', label: 'Google Ads' },
+  'mp-lead': { bg: '#e8c54722', color: '#e8c547', border: '#e8c54744', label: 'MP Lead' },
+  'iul-lead': { bg: '#a78bfa22', color: '#a78bfa', border: '#a78bfa44', label: 'IUL Lead' },
   'unknown': { bg: '#88888822', color: '#888', border: '#88888844', label: 'Unknown' },
 };
 
@@ -321,7 +313,7 @@ function sourceTag(source) {
 const styles = `
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: #0a0a18; color: #ddd; font-family: 'Segoe UI', sans-serif; padding: 24px; }
-  h1 { color: #e8c547; font-size: 22px; margin-bottom: 4px; }
+  h1 { color: #cccccc; font-size: 22px; margin-bottom: 4px; }
   .subtitle { color: #555; font-size: 12px; margin-bottom: 20px; }
   .tabs { display: flex; gap: 4px; margin-bottom: 20px; }
   .tab { padding: 7px 16px; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; border: 1px solid transparent; text-decoration: none; color: #666; }
@@ -329,7 +321,7 @@ const styles = `
   .stats { display: flex; gap: 0; margin-bottom: 20px; background: #111128; border: 1px solid #1a1a2e; border-radius: 10px; overflow: hidden; }
   .stat { flex: 1; padding: 14px 20px; border-right: 1px solid #1a1a2e; }
   .stat:last-child { border-right: none; }
-  .stat-label { color: '#444'; font-size: 9px; letter-spacing: 1.5px; margin-bottom: 4px; }
+  .stat-label { color: #444; font-size: 9px; letter-spacing: 1.5px; margin-bottom: 4px; }
   .stat-value { color: #e8c547; font-size: 20px; font-weight: 900; }
   table { width: 100%; border-collapse: collapse; background: #111128; border-radius: 12px; overflow: hidden; margin-bottom: 24px; }
   th { background: #0d0d1f; color: #555; font-size: 11px; letter-spacing: 1px; padding: 12px 16px; text-align: left; }
@@ -388,12 +380,12 @@ const styles = `
 `;
 
 function adminPage(activeTab, content) {
-  return `<!DOCTYPE html><html><head><title>LeadRouter Admin</title><style>${styles}</style></head><body>
+  return `<!DOCTYPE html><html><head><title>True West Systems LeadRouter Admin</title><style>${styles}</style></head><body>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-      <h1>⟳ True West Systems LeadRouter Admin</h1>
+      <h1>⟳ True West Systems LeadRouter</h1>
       <a href="/admin/logout" class="logout">Logout</a>
     </div>
-    <div class="subtitle">Manage agents, lead allocations, and licensed states</div>
+    <div class="subtitle">True West Systems — Lead Distribution System</div>
     <div class="tabs">
       <a href="/admin" class="tab ${activeTab === 'agents' ? 'active' : ''}">Agents</a>
       <a href="/admin/log" class="tab ${activeTab === 'log' ? 'active' : ''}">Activity Log</a>
@@ -406,13 +398,13 @@ function adminPage(activeTab, content) {
 
 // ── LOGIN ─────────────────────────────────────────────────
 app.get('/admin/login', (req, res) => {
-  res.send(`<!DOCTYPE html><html><head><title>True West Systems LeadRouter Admin</title><style>
+  res.send(`<!DOCTYPE html><html><head><title>True West Systems LeadRouter</title><style>
     ${styles} body{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:0;}
     .box{background:#111128;border:1px solid #2a2a3e;border-radius:12px;padding:40px;width:360px;}
   </style></head><body>
     <div class="box">
       <h1>⟳ True West Systems LeadRouter</h1>
-      <p class="subtitle">Admin Dashboard — Enter password to continue</p>
+      <p class="subtitle">True West Systems — Enter password to continue</p>
       <form method="POST" action="/admin/login">
         <label>PASSWORD</label>
         <input type="password" name="password" autofocus />
@@ -427,14 +419,14 @@ app.post('/admin/login', (req, res) => {
     res.setHeader('Set-Cookie', `admin_auth=${ADMIN_PASSWORD}; Path=/; HttpOnly`);
     res.redirect('/admin');
   } else {
-    res.send(`<!DOCTYPE html><html><head><title>True West Systems LeadRouter Admin</title><style>
+    res.send(`<!DOCTYPE html><html><head><title>True West Systems LeadRouter</title><style>
       ${styles} body{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:0;}
       .box{background:#111128;border:1px solid #2a2a3e;border-radius:12px;padding:40px;width:360px;}
       .error{color:#ff5555;font-size:12px;margin-bottom:12px;}
     </style></head><body>
       <div class="box">
         <h1>⟳ True West Systems LeadRouter</h1>
-        <p class="subtitle">Admin Dashboard</p>
+        <p class="subtitle">True West Systems</p>
         <p class="error">Wrong password. Try again.</p>
         <form method="POST" action="/admin/login">
           <label>PASSWORD</label>
@@ -448,11 +440,11 @@ app.post('/admin/login', (req, res) => {
 
 // ── AGENTS TAB ────────────────────────────────────────────
 app.get('/admin', checkAuth, (req, res) => {
-  const metaQueue = buildQueueForSource('meta-ads');
-  const googleQueue = buildQueueForSource('google-ads');
+  const mpQueue = buildQueueForSource('mp-lead');
+  const iulQueue = buildQueueForSource('iul-lead');
   const totalLeads = agents.reduce((s, a) => s + (a.leadsReceived || 0), 0);
-  const totalMeta = agents.reduce((s, a) => s + (a.metaReceived || 0), 0);
-  const totalGoogle = agents.reduce((s, a) => s + (a.googleReceived || 0), 0);
+  const totalMP = agents.reduce((s, a) => s + (a.metaReceived || 0), 0);
+  const totalIUL = agents.reduce((s, a) => s + (a.googleReceived || 0), 0);
 
   const agentRows = agents.map(a => `
     <tr>
@@ -460,21 +452,21 @@ app.get('/admin', checkAuth, (req, res) => {
       <td><span class="state-list">${a.states.join(', ')}</span></td>
       <td>
         <div class="source-split">
-          <div><div class="source-label" style="color:#1877f2">META</div><div class="source-value" style="color:#1877f2">${a.metaLeads}</div></div>
-          <div><div class="source-label" style="color:#34a853">GOOGLE</div><div class="source-value" style="color:#34a853">${a.googleLeads}</div></div>
+          <div><div class="source-label" style="color:#e8c547">MP</div><div class="source-value" style="color:#e8c547">${a.metaLeads}</div></div>
+          <div><div class="source-label" style="color:#a78bfa">IUL</div><div class="source-value" style="color:#a78bfa">${a.googleLeads}</div></div>
         </div>
       </td>
       <td>
         <div class="count-split">
-          <div><div class="count-label" style="color:#1877f2">META</div><div class="count-value" style="color:#1877f2">${a.metaReceived || 0}</div></div>
-          <div><div class="count-label" style="color:#34a853">GOOGLE</div><div class="count-value" style="color:#34a853">${a.googleReceived || 0}</div></div>
-          <div><div class="count-label" style="color:#e8c547">TOTAL</div><div class="count-value" style="color:#e8c547">${a.leadsReceived || 0}</div></div>
+          <div><div class="count-label" style="color:#e8c547">MP</div><div class="count-value" style="color:#e8c547">${a.metaReceived || 0}</div></div>
+          <div><div class="count-label" style="color:#a78bfa">IUL</div><div class="count-value" style="color:#a78bfa">${a.googleReceived || 0}</div></div>
+          <div><div class="count-label" style="color:#fff">TOTAL</div><div class="count-value" style="color:#fff">${a.leadsReceived || 0}</div></div>
         </div>
       </td>
       <td>
         <div style="font-size:11px;color:#555">
-          Meta: ${metaQueue.filter(id => id === a.id).length}/${metaQueue.length || 1}<br/>
-          Google: ${googleQueue.filter(id => id === a.id).length}/${googleQueue.length || 1}
+          MP: ${mpQueue.filter(id => id === a.id).length}/${mpQueue.length || 1}<br/>
+          IUL: ${iulQueue.filter(id => id === a.id).length}/${iulQueue.length || 1}
         </div>
       </td>
       <td><span class="badge ${a.active ? 'active' : 'paused'}">${a.active ? 'Active' : 'Paused'}</span></td>
@@ -491,8 +483,8 @@ app.get('/admin', checkAuth, (req, res) => {
       <div class="stat"><div class="stat-label">TOTAL AGENTS</div><div class="stat-value">${agents.length}</div></div>
       <div class="stat"><div class="stat-label">ACTIVE</div><div class="stat-value">${agents.filter(a => a.active).length}</div></div>
       <div class="stat"><div class="stat-label">TOTAL ROUTED</div><div class="stat-value">${totalLeads}</div></div>
-      <div class="stat"><div class="stat-label">META ROUTED</div><div class="stat-value" style="color:#1877f2">${totalMeta}</div></div>
-      <div class="stat"><div class="stat-label">GOOGLE ROUTED</div><div class="stat-value" style="color:#34a853">${totalGoogle}</div></div>
+      <div class="stat"><div class="stat-label">MP LEADS ROUTED</div><div class="stat-value" style="color:#e8c547">${totalMP}</div></div>
+      <div class="stat"><div class="stat-label">IUL LEADS ROUTED</div><div class="stat-value" style="color:#a78bfa">${totalIUL}</div></div>
     </div>
 
     <div class="section-title">Agent Roster</div>
@@ -519,8 +511,8 @@ app.get('/admin', checkAuth, (req, res) => {
         <label>LICENSED STATES (comma separated e.g. AZ,UT,NV)</label>
         <input type="text" id="editStates" placeholder="AZ,UT,NV" />
         <div class="two-col">
-          <div><label style="color:#1877f2">META ADS LEADS/WEEK</label><input type="number" id="editMetaLeads" min="0" /></div>
-          <div><label style="color:#34a853">GOOGLE ADS LEADS/WEEK</label><input type="number" id="editGoogleLeads" min="0" /></div>
+          <div><label style="color:#e8c547">MP LEADS/WEEK</label><input type="number" id="editMetaLeads" min="0" /></div>
+          <div><label style="color:#a78bfa">IUL LEADS/WEEK</label><input type="number" id="editGoogleLeads" min="0" /></div>
         </div>
         <div style="color:#555;font-size:11px;margin-top:-8px;margin-bottom:14px">Set to 0 to exclude from that source queue</div>
         <div style="display:flex;gap:8px">
@@ -539,8 +531,8 @@ app.get('/admin', checkAuth, (req, res) => {
         <label>API KEY VARIABLE NAME</label><input type="text" id="addApiKeyVar" placeholder="AGT006_API_KEY" style="font-family:monospace" />
         <label>LICENSED STATES (comma separated)</label><input type="text" id="addStates" placeholder="AZ,UT,NV" />
         <div class="two-col">
-          <div><label style="color:#1877f2">META ADS LEADS/WEEK</label><input type="number" id="addMetaLeads" min="0" placeholder="20" /></div>
-          <div><label style="color:#34a853">GOOGLE ADS LEADS/WEEK</label><input type="number" id="addGoogleLeads" min="0" placeholder="20" /></div>
+          <div><label style="color:#e8c547">MP LEADS/WEEK</label><input type="number" id="addMetaLeads" min="0" placeholder="20" /></div>
+          <div><label style="color:#a78bfa">IUL LEADS/WEEK</label><input type="number" id="addGoogleLeads" min="0" placeholder="20" /></div>
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn-primary" onclick="addAgent()">Add Agent</button>
@@ -619,8 +611,8 @@ app.get('/admin/log', checkAuth, (req, res) => {
         </div>
       `).join('');
 
-  const metaCount = activityLog.filter(e => e.source === 'meta-ads').length;
-  const googleCount = activityLog.filter(e => e.source === 'google-ads').length;
+  const mpCount = activityLog.filter(e => e.source === 'mp-lead').length;
+  const iulCount = activityLog.filter(e => e.source === 'iul-lead').length;
   const routedCount = activityLog.filter(e => e.status === 'routed').length;
   const unroutedCount = activityLog.filter(e => e.status === 'unrouted').length;
 
@@ -628,8 +620,8 @@ app.get('/admin/log', checkAuth, (req, res) => {
     <div class="stats">
       <div class="stat"><div class="stat-label">ROUTED (SESSION)</div><div class="stat-value">${routedCount}</div></div>
       <div class="stat"><div class="stat-label">UNROUTED</div><div class="stat-value" style="color:#ff5555">${unroutedCount}</div></div>
-      <div class="stat"><div class="stat-label">META ADS</div><div class="stat-value" style="color:#1877f2">${metaCount}</div></div>
-      <div class="stat"><div class="stat-label">GOOGLE ADS</div><div class="stat-value" style="color:#34a853">${googleCount}</div></div>
+      <div class="stat"><div class="stat-label">MP LEADS</div><div class="stat-value" style="color:#e8c547">${mpCount}</div></div>
+      <div class="stat"><div class="stat-label">IUL LEADS</div><div class="stat-value" style="color:#a78bfa">${iulCount}</div></div>
     </div>
     <div class="note">⚠️ <span>Activity log resets on server restart.</span> For permanent history see the <a href="/admin/reports" style="color:#e8c547">Reports tab</a>.</div>
     <div class="log-box">
@@ -671,8 +663,8 @@ app.get('/admin/reports', checkAuth, (req, res) => {
 
   const totalAll = allLeads.length;
   const totalRouted = allLeads.filter(l => l.status === 'routed').length;
-  const totalMeta = allLeads.filter(l => l.source === 'meta-ads').length;
-  const totalGoogle = allLeads.filter(l => l.source === 'google-ads').length;
+  const totalMP = allLeads.filter(l => l.source === 'mp-lead').length;
+  const totalIUL = allLeads.filter(l => l.source === 'iul-lead').length;
 
   const agentOptions = [...new Set(allLeads.map(l => l.agent).filter(Boolean))]
     .map(a => `<option value="${a}" ${filterAgent === a ? 'selected' : ''}>${a}</option>`).join('');
@@ -696,8 +688,8 @@ app.get('/admin/reports', checkAuth, (req, res) => {
     <div class="stats">
       <div class="stat"><div class="stat-label">ALL TIME LEADS</div><div class="stat-value">${totalAll}</div></div>
       <div class="stat"><div class="stat-label">ROUTED</div><div class="stat-value">${totalRouted}</div></div>
-      <div class="stat"><div class="stat-label">META ADS</div><div class="stat-value" style="color:#1877f2">${totalMeta}</div></div>
-      <div class="stat"><div class="stat-label">GOOGLE ADS</div><div class="stat-value" style="color:#34a853">${totalGoogle}</div></div>
+      <div class="stat"><div class="stat-label">MP LEADS</div><div class="stat-value" style="color:#e8c547">${totalMP}</div></div>
+      <div class="stat"><div class="stat-label">IUL LEADS</div><div class="stat-value" style="color:#a78bfa">${totalIUL}</div></div>
       <div class="stat"><div class="stat-label">UNROUTED</div><div class="stat-value" style="color:#ff5555">${totalAll - totalRouted}</div></div>
     </div>
 
@@ -710,8 +702,8 @@ app.get('/admin/reports', checkAuth, (req, res) => {
       </select>
       <select onchange="applyFilter('source', this.value)">
         <option value="">All Sources</option>
-        <option value="meta-ads" ${filterSource === 'meta-ads' ? 'selected' : ''}>Meta Ads</option>
-        <option value="google-ads" ${filterSource === 'google-ads' ? 'selected' : ''}>Google Ads</option>
+        <option value="mp-lead" ${filterSource === 'mp-lead' ? 'selected' : ''}>MP Lead</option>
+        <option value="iul-lead" ${filterSource === 'iul-lead' ? 'selected' : ''}>IUL Lead</option>
         <option value="unknown" ${filterSource === 'unknown' ? 'selected' : ''}>Unknown</option>
       </select>
       <select onchange="applyFilter('status', this.value)">
@@ -743,9 +735,7 @@ app.get('/admin/reports', checkAuth, (req, res) => {
         else url.searchParams.delete(key);
         window.location = url;
       }
-      function clearFilters(){
-        window.location = '/admin/reports';
-      }
+      function clearFilters(){ window.location = '/admin/reports'; }
       async function exportCSV(){
         const res = await fetch('/admin/export-csv', {headers});
         const blob = await res.blob();
@@ -764,15 +754,8 @@ app.get('/admin/export-csv', checkAuth, (req, res) => {
   const allLeads = loadLeads();
   const headers = ['Date/Time','First Name','Last Name','State','Source','Agent','Status','Email','Phone'];
   const rows = allLeads.map(l => [
-    l.time || '',
-    l.firstName || '',
-    l.lastName || '',
-    l.state || '',
-    l.source || '',
-    l.agent || '',
-    l.status || '',
-    l.email || '',
-    l.phone || '',
+    l.time || '', l.firstName || '', l.lastName || '', l.state || '',
+    l.source || '', l.agent || '', l.status || '', l.email || '', l.phone || '',
   ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
   const csv = [headers.join(','), ...rows].join('\n');
   res.setHeader('Content-Type', 'text/csv');
@@ -794,39 +777,40 @@ app.get('/admin/webhook', checkAuth, (req, res) => {
         <thead><tr><th>SOURCE</th><th>HOW DETECTED</th><th>QUEUE</th><th>TAG APPLIED</th></tr></thead>
         <tbody>
           <tr>
-            <td>${sourceTag('meta-ads')}</td>
-            <td style="color:#888;font-size:12px">Contact has meta-ads tag OR lead_source = "campaign"</td>
-            <td style="color:#1877f2;font-size:12px;font-weight:700">Meta Queue</td>
-            <td><span style="font-family:monospace;color:#888;font-size:11px">meta-ads</span></td>
+            <td>${sourceTag('mp-lead')}</td>
+            <td style="color:#888;font-size:12px">Contact has "mp lead" tag OR lead_source = "campaign"</td>
+            <td style="color:#e8c547;font-size:12px;font-weight:700">MP Queue</td>
+            <td><span style="font-family:monospace;color:#888;font-size:11px">mp-lead</span></td>
           </tr>
           <tr>
-            <td>${sourceTag('google-ads')}</td>
-            <td style="color:#888;font-size:12px">Contact has google-ads tag OR lead_source = "marketplace"</td>
-            <td style="color:#34a853;font-size:12px;font-weight:700">Google Queue</td>
-            <td><span style="font-family:monospace;color:#888;font-size:11px">google-ads</span></td>
+            <td>${sourceTag('iul-lead')}</td>
+            <td style="color:#888;font-size:12px">Contact has "iul-lead" tag OR lead_source = "marketplace"</td>
+            <td style="color:#a78bfa;font-size:12px;font-weight:700">IUL Queue</td>
+            <td><span style="font-family:monospace;color:#888;font-size:11px">iul-lead</span></td>
           </tr>
         </tbody>
       </table>
     </div>
     <div class="webhook-box">
       <h3>WESTMARK — LEAD ROUTER WORKFLOW</h3>
-      <div class="step"><div class="step-num">1</div><div class="step-content">Triggers: <strong>Contact Tag Added → meta-ads</strong> AND <strong>Contact Tag Added → google-ads</strong></div></div>
-      <div class="step"><div class="step-num">2</div><div class="step-content">Action: <strong>Webhook → POST</strong> to the URL above</div></div>
-      <div class="step"><div class="step-num">3</div><div class="step-content">Custom Data: <strong>State → {{contact.state}}</strong></div></div>
-      <div class="step"><div class="step-num">4</div><div class="step-content">Confirm workflow is <strong>Published</strong></div></div>
+      <div class="step"><div class="step-num">1</div><div class="step-content">Triggers: <strong>Contact Tag Added → mp lead</strong> AND <strong>Contact Tag Added → iul-lead</strong></div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-content">Wait: <strong>2 minutes</strong> (allows custom fields to sync)</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-content">Action: <strong>Webhook → POST</strong> to the URL above</div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-content">Custom Data: <strong>State, LeadSource, Intent, Benerelationship, Benename</strong></div></div>
+      <div class="step"><div class="step-num">5</div><div class="step-content">Confirm workflow is <strong>Published</strong></div></div>
     </div>
     <div class="webhook-box">
       <h3>OTHER GHL — ACL LEAD INPUT WORKFLOW</h3>
       <div class="step"><div class="step-num">1</div><div class="step-content">Trigger: <strong>Inbound Webhook</strong></div></div>
       <div class="step"><div class="step-num">2</div><div class="step-content">Create Contact: State = <strong>{{inboundWebhookRequest.region}}</strong></div></div>
-      <div class="step"><div class="step-num">3</div><div class="step-content">If/Else: Lead Source contains "campaign" → <strong>Add Tag: meta-ads</strong> / else → <strong>Add Tag: google-ads</strong></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-content">Add Tag: <strong>mp lead</strong> (for all MP leads)</div></div>
       <div class="step"><div class="step-num">4</div><div class="step-content">Copy Contact to WestMark: <strong>Copy Tags ON, Copy Custom Fields ON</strong></div></div>
     </div>
   `;
   res.send(adminPage('webhook', content));
 });
 
-// ── ADMIN API ROUTES ──────────────────────────────────────
+// ── ADMIN API ─────────────────────────────────────────────
 app.post('/admin/update-agent', checkAuth, (req, res) => {
   const { id, name, states, metaLeads, googleLeads } = req.body;
   const agent = agents.find(a => a.id === id);
@@ -894,7 +878,7 @@ app.get('/admin/logout', (req, res) => {
 });
 
 // ── MAIN WEBHOOK ──────────────────────────────────────────
-app.get('/', (req, res) => res.send('LeadRouter is running!'));
+app.get('/', (req, res) => res.send('AFG LeadRouter is running!'));
 
 app.post('/webhook/ghl-lead', async (req, res) => {
   try {
@@ -941,7 +925,6 @@ app.post('/webhook/ghl-lead', async (req, res) => {
       contactId = contactErr.response?.data?.meta?.contactId;
       if (!contactId) throw contactErr;
       console.log('Duplicate contact, using existing ID: ' + contactId);
-      // Update existing contact with latest beneficiary info
       try {
         await axios.put(
           'https://services.leadconnectorhq.com/contacts/' + contactId,
@@ -970,7 +953,7 @@ app.post('/webhook/ghl-lead', async (req, res) => {
       return res.json({ status: 'partial', note: 'Contact created but no pipeline stage found' });
     }
 
-    const sourceLabel = leadSource === 'meta-ads' ? 'Meta Ads' : leadSource === 'google-ads' ? 'Google Ads' : 'Lead';
+    const sourceLabel = leadSource === 'mp-lead' ? 'MP Lead' : leadSource === 'iul-lead' ? 'IUL Lead' : 'Lead';
     const oppName = `${firstName} ${lastName} — ${sourceLabel}`.trim() || 'New Lead';
 
     await axios.post(
@@ -986,23 +969,15 @@ app.post('/webhook/ghl-lead', async (req, res) => {
       { headers: { 'Authorization': 'Bearer ' + agent.apiKey, 'Content-Type': 'application/json', 'Version': '2021-07-28' } }
     );
 
-    // Update counts
     agent.leadsReceived = (agent.leadsReceived || 0) + 1;
-    if (leadSource === 'meta-ads') agent.metaReceived = (agent.metaReceived || 0) + 1;
-    else if (leadSource === 'google-ads') agent.googleReceived = (agent.googleReceived || 0) + 1;
+    if (leadSource === 'mp-lead') agent.metaReceived = (agent.metaReceived || 0) + 1;
+    else if (leadSource === 'iul-lead') agent.googleReceived = (agent.googleReceived || 0) + 1;
     saveData();
 
-    // Save to permanent report
     saveLead({
       time: new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }),
-      firstName,
-      lastName,
-      email,
-      phone,
-      state,
-      source: leadSource,
-      agent: agent.name,
-      status: 'routed',
+      firstName, lastName, email, phone, state,
+      source: leadSource, agent: agent.name, status: 'routed',
     });
 
     addLog('routed', `${firstName} ${lastName} (${state}) → ${agent.name}`, leadSource);
@@ -1017,4 +992,4 @@ app.post('/webhook/ghl-lead', async (req, res) => {
   }
 });
 
-app.listen(3000, () => console.log('LeadRouter running on port 3000'));
+app.listen(3000, () => console.log('AFG LeadRouter running on port 3000'));
