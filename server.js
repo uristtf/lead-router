@@ -172,7 +172,9 @@ function addLog(status, message, source) {
 
 // ── QUEUE LOGIC ───────────────────────────────────────────
 function buildQueueForSource(source) {
-  const leadsKey = source === 'meta-ads' ? 'metaLeads' : source === 'google-ads' ? 'googleLeads' : 'metaLeads';
+  const leadsKey = source === 'meta-ads' ? 'metaLeads' 
+    : source === 'google-ads' ? 'googleLeads' 
+    : 'metaLeads'; // new-lead and unknown use metaLeads queue
   const eligible = agents.filter(a => a.active && a[leadsKey] > 0);
   if (!eligible.length) return [];
   const min = Math.min(...eligible.map(a => a[leadsKey]));
@@ -187,12 +189,16 @@ function buildQueueForSource(source) {
 function getNextAgent(state, source) {
   const queue = buildQueueForSource(source);
   if (!queue.length) return null;
-  const leadsKey = source === 'meta-ads' ? 'metaLeads' : source === 'google-ads' ? 'googleLeads' : 'metaLeads';
+  const leadsKey = source === 'meta-ads' ? 'metaLeads' 
+    : source === 'google-ads' ? 'googleLeads' 
+    : 'metaLeads';
   const eligible = new Set(
     agents.filter(a => a.active && a[leadsKey] > 0 && a.states.includes(state)).map(a => a.id)
   );
   if (!eligible.size) return null;
-  let pointer = source === 'meta-ads' ? metaPointer : source === 'google-ads' ? googlePointer : unknownPointer;
+  let pointer = source === 'meta-ads' ? metaPointer 
+    : source === 'google-ads' ? googlePointer 
+    : unknownPointer;
   for (let i = 0; i < queue.length * 2; i++) {
     const id = queue[pointer % queue.length];
     pointer = (pointer + 1) % queue.length;
@@ -237,15 +243,21 @@ async function applyTagToContact(agent, contactId, tag) {
 
 function detectLeadSource(body) {
   const src = (body.lead_source || body.leadSource || body.source || '').toLowerCase();
+  
+  // Check for tags passed from GHL
   const tags = body.tags || body.contact_tags || '';
   if (typeof tags === 'string') {
+    if (tags.includes('new-lead')) return 'new-lead';
     if (tags.includes('meta-ads')) return 'meta-ads';
     if (tags.includes('google-ads')) return 'google-ads';
   }
   if (Array.isArray(tags)) {
+    if (tags.some(t => t.includes('new-lead'))) return 'new-lead';
     if (tags.some(t => t.includes('meta'))) return 'meta-ads';
     if (tags.some(t => t.includes('google'))) return 'google-ads';
   }
+
+  // Detect from At Cost Leads payload
   if (src === 'campaign' || body.facebook_leadgen_id) return 'meta-ads';
   if (src === 'marketplace') return 'google-ads';
   if (src) return src;
@@ -256,17 +268,21 @@ function parseLeadFields(body) {
   const questions = body.facebook_questions_answers || [];
   const customFields = body.custom_fields || {};
 
+  // Try facebook questions array first, then custom_fields object
+  const intent =
+    questions.find(q => q.field_name === 'question_1')?.answer ||
+    customFields['How Important Is It To You That Your Family Wouldnt Lose The Home If You Passed Away Unexpectedly?'] ||
+    body.contact?.intent || body.intent || '';
+
   const beneRelationship =
+    questions.find(q => q.field_name === 'question_2')?.answer ||
     customFields['Who Is Your Beneficiary?'] ||
-    questions.find(q => q.field_name === 'question_2')?.answer || '';
+    body.contact?.benerelationship || body.benerelationship || '';
 
   const beneName =
+    questions.find(q => q.field_name === 'question_3')?.answer ||
     customFields['Beneficiary name?'] ||
-    questions.find(q => q.field_name === 'question_3')?.answer || '';
-
-  const intent =
-    customFields['How Important Is It To You That Your Family Wouldnt Lose The Home If You Passed Away Unexpectedly?'] ||
-    questions.find(q => q.field_name === 'question_1')?.answer || '';
+    body.contact?.benename || body.benename || '';
 
   return {
     firstName: body.first_name || body.firstName || body.contact?.firstName || '',
