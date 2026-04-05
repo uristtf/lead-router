@@ -264,18 +264,18 @@ function parseLeadFields(body) {
   const intent =
     questions.find(q => q.field_name === 'question_1')?.answer ||
     customFields['How Important Is It To You That Your Family Wouldnt Lose The Home If You Passed Away Unexpectedly?'] ||
-    body.contact?.intent || body.intent || '';
+    body.Intent || body.intent || body.contact?.intent || '';
 
-  const beneRelationship =
+const beneRelationship =
     questions.find(q => q.field_name === 'question_2')?.answer ||
     customFields['Who Is Your Beneficiary?'] ||
-    body.contact?.benerelationship || body.benerelationship || body.Benerelationship || '';
+    body.Benerelationship || body.benerelationship || body.contact?.benerelationship || '';
 
-  const beneName =
+const beneName =
     questions.find(q => q.field_name === 'question_3')?.answer ||
     customFields['Beneficiary name?'] ||
-    body.contact?.benename || body.benename || body.Benename || '';
-
+    body.Benename || body.benename || body.contact?.benename || '';
+  
   return {
     firstName: body.first_name || body.firstName || body.contact?.firstName || '',
     lastName: body.last_name || body.lastName || body.contact?.lastName || '',
