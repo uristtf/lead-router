@@ -925,19 +925,23 @@ app.post('/webhook/ghl-lead', async (req, res) => {
     let contactId;
     try {
       const contactResponse = await axios.post(
-        'https://services.leadconnectorhq.com/contacts/',
-        {
-          firstName,
-          lastName,
-          email,
-          phone,
-          locationId: agent.locationId,
-          customFields: [
-            ...(beneRelationship ? [{ key: 'benerelationship', field_value: beneRelationship }] : []),
-            ...(beneName ? [{ key: 'benename', field_value: beneName }] : []),
-            ...(intent ? [{ key: 'intent', field_value: intent }] : []),
-          ],
-        },
+  'https://services.leadconnectorhq.com/contacts/',
+  {
+    firstName,
+    lastName,
+    email,
+    phone,
+    locationId: agent.locationId,
+    state: state,
+    address1: body.address_line_1 || body.address || '',
+    city: body.city || '',
+    postalCode: body.postal_code || '',
+    customFields: [
+      ...(beneRelationship ? [{ key: 'benerelationship', field_value: beneRelationship }] : []),
+      ...(beneName ? [{ key: 'benename', field_value: beneName }] : []),
+      ...(intent ? [{ key: 'intent', field_value: intent }] : []),
+    ],
+  },
         { headers: { 'Authorization': 'Bearer ' + agent.apiKey, 'Content-Type': 'application/json', 'Version': '2021-07-28' } }
       );
       contactId = contactResponse.data.contact.id;
@@ -948,14 +952,15 @@ app.post('/webhook/ghl-lead', async (req, res) => {
       console.log('Duplicate contact, using existing ID: ' + contactId);
       try {
         await axios.put(
-          'https://services.leadconnectorhq.com/contacts/' + contactId,
-          {
-            customFields: [
-              ...(beneRelationship ? [{ key: 'benerelationship', field_value: beneRelationship }] : []),
-              ...(beneName ? [{ key: 'benename', field_value: beneName }] : []),
-              ...(intent ? [{ key: 'intent', field_value: intent }] : []),
-            ],
-          },
+  'https://services.leadconnectorhq.com/contacts/' + contactId,
+  {
+    state: state,
+    customFields: [
+      ...(beneRelationship ? [{ key: 'benerelationship', field_value: beneRelationship }] : []),
+      ...(beneName ? [{ key: 'benename', field_value: beneName }] : []),
+      ...(intent ? [{ key: 'intent', field_value: intent }] : []),
+    ],
+  },
           { headers: { 'Authorization': 'Bearer ' + agent.apiKey, 'Content-Type': 'application/json', 'Version': '2021-07-28' } }
         );
       } catch (updateErr) {
@@ -1013,4 +1018,4 @@ app.post('/webhook/ghl-lead', async (req, res) => {
   }
 });
 
-app.listen(3000, () => console.log('AFG LeadRouter running on port 3000'));
+app.listen(3000, () => console.log('True West Systems LeadRouter running on port 3000'));
