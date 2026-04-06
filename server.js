@@ -281,7 +281,7 @@ const beneName =
     lastName: body.last_name || body.lastName || body.contact?.lastName || '',
     email: body.email || body.contact?.email || '',
     phone: body.phone || body.textable_phone || body.phoneNumber || body.contact?.phone || '',
-    state: (body.region || body.State || body.state || body.contact?.state || '').toUpperCase().trim(),
+    state: (body.State || body.state || body.region || body.contact?.state || body.contact?.State || '').toUpperCase().trim(),
     leadSource: detectLeadSource(body),
     beneRelationship,
     beneName,
