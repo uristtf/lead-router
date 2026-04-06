@@ -932,10 +932,7 @@ app.post('/webhook/ghl-lead', async (req, res) => {
   email,
   phone,
   locationId: agent.locationId,
-  address1: body.address_line_1 || '',
-  city: body.city || '',
   state: state,
-  postalCode: body.postal_code || '',
   country: 'US',
   customFields: [
     ...(beneRelationship ? [{ key: 'benerelationship', field_value: beneRelationship }] : []),
