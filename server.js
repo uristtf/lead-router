@@ -291,9 +291,15 @@ function parseLeadFields(body) {
     customFields['Beneficiary name?'] ||
     body.Benename || body.benename || body.contact?.benename || '';
 
-  return {
-    firstName: body.first_name || body.firstName || body.contact?.firstName || '',
-    lastName: body.last_name || body.lastName || body.contact?.lastName || '',
+  // Handle full_name from Gold Signal AI
+const fullName = body.full_name || body.fullName || '';
+const nameParts = fullName.trim().split(' ');
+const derivedFirst = nameParts[0] || '';
+const derivedLast = nameParts.slice(1).join(' ') || '';
+
+return {
+    firstName: body.first_name || body.firstName || body.contact?.firstName || derivedFirst || '',
+    lastName: body.last_name || body.lastName || body.contact?.lastName || derivedLast || '',
     email: body.email || body.contact?.email || '',
     phone: body.phone || body.textable_phone || body.phoneNumber || body.contact?.phone || '',
     state: (body.State || body.state || body.region || body.contact?.state || '').toUpperCase().trim(),
