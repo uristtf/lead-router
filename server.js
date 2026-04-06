@@ -927,21 +927,22 @@ app.post('/webhook/ghl-lead', async (req, res) => {
       const contactResponse = await axios.post(
   'https://services.leadconnectorhq.com/contacts/',
   {
-    firstName,
-    lastName,
-    email,
-    phone,
-    locationId: agent.locationId,
-    state: state,
-    address1: body.address_line_1 || body.address || '',
-    city: body.city || '',
-    postalCode: body.postal_code || '',
-    customFields: [
-      ...(beneRelationship ? [{ key: 'benerelationship', field_value: beneRelationship }] : []),
-      ...(beneName ? [{ key: 'benename', field_value: beneName }] : []),
-      ...(intent ? [{ key: 'intent', field_value: intent }] : []),
-    ],
-  },
+  firstName,
+  lastName,
+  email,
+  phone,
+  locationId: agent.locationId,
+  address1: body.address_line_1 || '',
+  city: body.city || '',
+  state: state,
+  postalCode: body.postal_code || '',
+  country: 'US',
+  customFields: [
+    ...(beneRelationship ? [{ key: 'benerelationship', field_value: beneRelationship }] : []),
+    ...(beneName ? [{ key: 'benename', field_value: beneName }] : []),
+    ...(intent ? [{ key: 'intent', field_value: intent }] : []),
+  ],
+},
         { headers: { 'Authorization': 'Bearer ' + agent.apiKey, 'Content-Type': 'application/json', 'Version': '2021-07-28' } }
       );
       contactId = contactResponse.data.contact.id;
