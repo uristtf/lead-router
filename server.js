@@ -261,27 +261,42 @@ function parseLeadFields(body) {
   const questions = body.facebook_questions_answers || [];
   const customFields = body.custom_fields || {};
 
+  // Match by question content instead of position
+  const intentQ = questions.find(q => 
+    q.question?.toLowerCase().includes('important') || 
+    q.field_name === 'question_1'
+  );
+  const beneRelQ = questions.find(q => 
+    q.question?.toLowerCase().includes('beneficiary') && 
+    !q.question?.toLowerCase().includes('name') ||
+    q.field_name === 'question_2'
+  );
+  const beneNameQ = questions.find(q => 
+    q.question?.toLowerCase().includes('beneficiary name') ||
+    q.field_name === 'question_3'
+  );
+
   const intent =
-    questions.find(q => q.field_name === 'question_1')?.answer ||
+    intentQ?.answer ||
     customFields['How Important Is It To You That Your Family Wouldnt Lose The Home If You Passed Away Unexpectedly?'] ||
     body.Intent || body.intent || body.contact?.intent || '';
 
-const beneRelationship =
-    questions.find(q => q.field_name === 'question_2')?.answer ||
+  const beneRelationship =
+    beneRelQ?.answer ||
     customFields['Who Is Your Beneficiary?'] ||
     body.Benerelationship || body.benerelationship || body.contact?.benerelationship || '';
 
-const beneName =
-    questions.find(q => q.field_name === 'question_3')?.answer ||
+  const beneName =
+    beneNameQ?.answer ||
     customFields['Beneficiary name?'] ||
     body.Benename || body.benename || body.contact?.benename || '';
-  
+
   return {
     firstName: body.first_name || body.firstName || body.contact?.firstName || '',
     lastName: body.last_name || body.lastName || body.contact?.lastName || '',
     email: body.email || body.contact?.email || '',
     phone: body.phone || body.textable_phone || body.phoneNumber || body.contact?.phone || '',
-    state: (body.State || body.state || body.region || body.contact?.state || body.contact?.State || '').toUpperCase().trim(),
+    state: (body.State || body.state || body.region || body.contact?.state || '').toUpperCase().trim(),
     leadSource: detectLeadSource(body),
     beneRelationship,
     beneName,
